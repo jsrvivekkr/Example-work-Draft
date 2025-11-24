@@ -13,4 +13,11 @@ ___
 [Download PPTX]([slides/presentation.pptx](https://docs.google.com/presentation/d/1a1qWEanfW2ggZRPkSSBu0mVdv5J6exZ1/edit?usp=sharing&ouid=113016786903665385533&rtpof=true&sd=true))
 
 ### Preview
-![Slide 1](glacierclassification.PNG)
+![Classification](glacierclassification.PNG)
+___
+## Digital soil mapping (Phosphorus and Zinc) for the Chirala, municipality, Andhra Pradesh using multiple linear regression. (Team Project: 3 members).
+### PPTX (Original)
+[Download PPTX]([slides/presentation.pptx](https://docs.google.com/presentation/d/1a1qWEanfW2ggZRPkSSBu0mVdv5J6exZ1/edit?usp=sharing&ouid=113016786903665385533&rtpof=true&sd=true))
+
+### Preview
+![Soil Map](SDQ_soilmap.PNG)
