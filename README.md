@@ -1,6 +1,13 @@
 # Example-work-Draft
 Just to showcase some of my work It will be improved over time.
 
+## Some results of my work at Mitti-Labs (Random Forest)
+
+![Agricultural Practice(DSR and TPR rice Cultivation)](ml2.png)
+![Rice Crop Identification(Seasonal cultivation pattern)](RiceMask_Rabi23_Kharif_24_names.png)
+
+___
+
 ## Spatiotemporal anomaly detection and visualization of Pine Island Glacier, Antarctica. (M. Tech thesis)
 
 ![Glacier Speed-up](ezgif.com-animated-gif-maker.gif)
