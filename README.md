@@ -11,8 +11,6 @@ ___
 ## Glacier facies classification using SAR - backscatter and glacier velocity mapping of Pine Island Glacier. (Case study)
 ### PPTX (Original)
 [Download PPTX]([slides/presentation.pptx](https://docs.google.com/presentation/d/1a1qWEanfW2ggZRPkSSBu0mVdv5J6exZ1/edit?usp=sharing&ouid=113016786903665385533&rtpof=true&sd=true))
-### PDF (View Inline)
-[View Presentation PDF](slides/presentation.pdf)
 
 ### Preview
-![Slide 1](slides/slide-01.png)
+![Slide 1](glacierclassification.PNG)
