@@ -28,3 +28,15 @@ ___
 
 ### Preview
 ![Soil Map](SDQ_soilmap.PNG)
+
+___
+## Role of GIS in determining potential ecotourism sites in Malappuram and Wayanad districts Northern Kerala. (Team Project: 4 members).
+
+### Preview
+![AHP map](AHP.PNG)
+___
+## Workflow to curate and decimate flooding-related data products and impact assessment (Team Project: 4 members).
+
+### Preview
+![Flood map](flood_map.PNG)
+___
