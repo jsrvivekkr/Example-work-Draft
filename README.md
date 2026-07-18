@@ -1,12 +1,10 @@
 # Example-work-Draft
-
+Crop Health Analytics Application GEE
+Link: https://ee-jsrvivekkr.projects.earthengine.app/view/crophealth
+![Field area distribution](area_distribution.png)
 
 
 Substac Posts
-![Field area distribution](area_distribution.png)
-Crop Health Analytics Application GEE
-Link: https://ee-jsrvivekkr.projects.earthengine.app/view/crophealth
-
 - https://open.substack.com/pub/vivekiirs21/p/alpha-earth-map-the-planet-in-unprecedented?r=5e22d5&utm_campaign=post-expanded-share&utm_medium=web
 
 Just to showcase some of my work It will be improved over time.
