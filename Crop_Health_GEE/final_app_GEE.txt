@@ -1,0 +1,644 @@
+// ==============================================================================
+// 1. DEFINE TIME FRAME & CONSTANTS.
+// ==============================================================================
+print('--- STEP 1: Defining Time Frame & Constants ---');
+var startDate = '2024-12-01';  // Rabi Season - Date of sowing
+var endDate = '2025-04-30';    // Date of Harvest
+
+var baseIndices = ['NDVI', 'NDRE', 'NDMI', 'MSAVI'];  //Indices for base lines
+var availableIndices = ['NDVI', 'NDRE', 'NDMI', 'MSAVI', 'PCA_Index']; 
+
+print('Start Date: Date of sowing:', startDate);
+print('End Date: Date of Harvest:', endDate);
+
+var indexVisParams = {
+  'NDVI':  {min: 0.1, max: 0.8, palette: ['#c7e9c0', '#a1d99b', '#74c476', '#31a354', '#006d2c']},
+  'MSAVI': {min: 0.1, max: 0.8, palette: ['#a6611a', '#dfc27d', '#f5f5f5', '#80cdc1', '#018571']}, 
+  'NDRE':  {min: 0.0, max: 0.5, palette: ['#fcbba1', '#fc9272', '#fb6a4a', '#de2d26', '#a50f15']},
+  'NDMI':  {min: -0.2, max: 0.5, palette: ['#c6dbef', '#9ecae1', '#6baed6', '#3182bd', '#08519c']},
+  'PCA_Index': {min: -2.0, max: 2.0, palette: ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725']}
+};
+
+// ==============================================================================
+// 1.1 PRE-PROCESS FIELDS (Calculate Area)
+// ==============================================================================
+print('--- STEP 1.1: Calculating Field Areas ---');
+// Add Area in hectares to the features
+var fieldsWithArea = fields.map(function(f) {
+  return f.set('Area_acres', f.area().divide(4046.86));
+});
+
+// ==============================================================================
+// 2. CLOUD MASKING & INDEX FUNCTIONS
+// ==============================================================================
+print('--- STEP 2: Initializing Cloud Masking & Index Functions ---');
+
+function maskS2clouds(image) {                                     
+  var scl = image.select('SCL');
+  var mask = scl.neq(3).and(scl.neq(8)).and(scl.neq(9)).and(scl.neq(10)); 
+  
+  return image.updateMask(mask)
+              .divide(10000)                
+              .copyProperties(image, ["system:time_start"]);
+}
+
+function addIndices(image) {                
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  var ndre = image.normalizedDifference(['B8', 'B5']).rename('NDRE');
+  var ndmi = image.normalizedDifference(['B8', 'B11']).rename('NDMI');
+  var msavi = image.expression(
+    '(2 * NIR + 1 - sqrt(pow((2 * NIR + 1), 2) - 8 * (NIR - RED))) / 2', {
+      'NIR': image.select('B8'),
+      'RED': image.select('B4')
+    }).rename('MSAVI');
+    
+  return image.addBands([ndvi, ndre, ndmi, msavi]);
+}
+
+// ==============================================================================
+// 3. PREPARE IMAGE COLLECTION & PCA CALCULATION
+// ==============================================================================
+print('--- STEP 3: Preparing Image Collection & Composites ---');
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(fieldsWithArea) 
+  .filterDate(startDate, endDate)
+  .map(maskS2clouds)
+  .map(addIndices);
+
+print("Sentinel collection",s2)
+
+
+var totalDays = ee.Date(endDate).difference(ee.Date(startDate), 'day'); 
+var daysList = ee.List.sequence(0, totalDays, 7);  
+
+var weeklyComposites = ee.ImageCollection.fromImages(      
+  daysList.map(function(d) {                              
+    var start = ee.Date(startDate).advance(d, 'day');     
+    var end = start.advance(7, 'day');                    
+    return s2.filterDate(start, end).mean().set('system:time_start', start.millis()); 
+  })
+);
+
+var finalCol = weeklyComposites.map(function(img) {
+  return img.set('band_count', img.bandNames().size());
+}).filter(ee.Filter.gt('band_count', 0));     
+
+
+print("7-Day mean composite",finalCol)
+
+var palette = [
+  '#2ecc71', // Green for NDVI
+  '#27ae60', // Dark Green for NDRE
+  '#3498db', // Blue for NDMI
+  '#e67e22'  // Orange for MSAVI
+];
+
+// Ensure both collections only contain the target bands
+var s2Selected = s2.select(baseIndices);
+var finalColSelected = finalCol.select(baseIndices);
+
+// ==========================================
+// CHART 1: Raw / Daily Collection Time Series
+// ==========================================
+var chart1 = ui.Chart.image.series({
+  imageCollection: s2Selected,
+  region: fieldsWithArea,
+  reducer: ee.Reducer.mean(),
+  scale: 10,
+  xProperty: 'system:time_start'
+})
+.setSeriesNames(baseIndices)
+.setOptions({
+  title: 'Chart 1: Sentinel-2 Daily/Raw Time Series',
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
+  vAxis: {title: 'Index Value', minValue: -1, maxValue: 1},
+  lineWidth: 1.5,
+  pointSize: 3,
+  colors: palette
+});
+
+// ==========================================
+// CHART 2: Weekly Mean Composite Time Series
+// ==========================================
+var chart2 = ui.Chart.image.series({
+  imageCollection: finalColSelected,
+  region: fieldsWithArea,
+  reducer: ee.Reducer.mean(),
+  scale: 10,
+  xProperty: 'system:time_start' // Ensure your weekly composite script sets this property
+})
+.setSeriesNames(baseIndices)
+.setOptions({
+  title: 'Chart 2: Weekly Mean Composite Time Series (Smoothed)',
+  hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
+  vAxis: {title: 'Index Value', minValue: -1, maxValue: 1},
+  lineWidth: 2.5,  // Slightly thicker line to emphasize composite trend
+  pointSize: 4,
+  colors: palette
+});
+
+// ==========================================
+// Print all three charts to the console
+// ==========================================
+print('--- TIME SERIES ANALYSIS PANELS ---');
+print(chart1);
+print(chart2);
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ==============================================================================
+// 4. PCA
+// ==============================================================================
+
+print('--- STEP 4: Computing Global PCA Weights (with Standardization) ---');
+var meanImage = finalCol.mean().select(baseIndices); 
+
+var meanStdReducer = ee.Reducer.mean().combine({
+  reducer2: ee.Reducer.stdDev(),
+  sharedInputs: true
+});
+
+var globalStats = meanImage.reduceRegion({
+  reducer: meanStdReducer,
+  geometry: fieldsWithArea,
+  scale: 10,
+  maxPixels: 1e9
+});
+
+var meanList = baseIndices.map(function(b) { return globalStats.getNumber(b + '_mean'); });
+var stdList = baseIndices.map(function(b) { return globalStats.getNumber(b + '_stdDev'); });
+
+var meansImage = ee.Image.constant(meanList).rename(baseIndices);
+var stdsImage = ee.Image.constant(stdList).rename(baseIndices);
+
+var standardizedMeanImage = meanImage.subtract(meansImage).divide(stdsImage);
+
+var covar = standardizedMeanImage.toArray().reduceRegion({
+  reducer: ee.Reducer.centeredCovariance(),
+  geometry: fieldsWithArea,
+  scale: 10,
+  maxPixels: 1e9
+}).get('array');
+
+var eigen = ee.Array(covar).eigen();
+var rawWeights = eigen.slice(0, 0, 1).slice(1, 1).project([1]); 
+
+
+// Flatten the 2D matrix into 1D for the chart, and plot it
+var matrixChart = ui.Chart.array.values({
+  array: ee.Array(covar),
+  axis: 0,
+  xLabels: baseIndices
+})
+.setChartType('Table') // Or 'ColumnChart'
+.setOptions({
+  title: 'Correlation Matrix',
+});
+print(matrixChart);
+
+
+
+var ndviWeight = rawWeights.get([0]);
+var sign = ndviWeight.divide(ndviWeight.abs()); 
+var pc1Weights = rawWeights.multiply(sign);
+
+print('2. Raw PC1 Weights:', rawWeights);
+print('2. pc1Weights:', pc1Weights);
+
+// --- VERIFY STRUCTURE: Print raw eigen matrix info ---
+print('EIGEN STRUCTURE:', eigen);
+
+// Column 0 of the eigen matrix contains the eigenvalues (the variance)
+var eigenValues = eigen.slice(1, 0, 1).project([0]);
+print('EIGENVALUES ARRAY:', eigenValues);
+
+// Calculate total variance
+var totalVariance = eigenValues.reduce(ee.Reducer.sum(), [0]).get([0]);
+print('TOTAL VARIANCE:', totalVariance);
+
+// --- ACCURACY ASSESSMENT: % of Variance Explained by ALL PCs ---
+// Divide every eigenvalue by total variance and multiply by 100
+var explainedVariancePctAll = eigenValues.divide(totalVariance).multiply(100);
+print('ACCURACY: % of Variance Explained by ALL PCs (Ordered PC1, PC2...):', explainedVariancePctAll);
+
+
+// // --- ACCURACY ASSESSMENT 1: PCA Explained Variance ---
+// // Column 0 of the eigen matrix contains the eigenvalues (the variance)
+// var eigenValues = eigen.slice(1, 0, 1).project([0]); 
+
+// var pc1Variance = eigenValues.get([0]); // The largest eigenvalue (PC1)
+// var totalVariance = eigenValues.reduce(ee.Reducer.sum(), [0]).get([0]);
+
+// var explainedVariancePct = pc1Variance.divide(totalVariance).multiply(100);
+// print('ACCURACY: % of Variance Explained by PC1:', explainedVariancePct);
+
+
+print('--- STEP 5: Mapping PCA Index into Collection ---');
+finalCol = finalCol.map(function(img) {
+  var weightImg = ee.Image.constant(pc1Weights.toList()).rename(baseIndices);
+  var standardizedImg = img.select(baseIndices).subtract(meansImage).divide(stdsImage);
+  
+  var pca = standardizedImg
+                .multiply(weightImg)
+                .reduce(ee.Reducer.sum())
+                .rename('PCA_Index');
+                
+  return img.addBands(pca);
+});
+
+// ==============================================================================
+// 5. GLOBAL STATE & UI LAYOUT (UPDATED)
+// ==============================================================================
+print('--- STEP 5: Building UI Layout ---');
+
+// UI Theme Definitions for consistent styling
+var theme = {
+  primary: '#2e7d32',       
+  secondary: '#e8f5e9',     
+  border: '1px solid #c8e6c9',
+  text: '#333333',
+  fontFamily: 'Helvetica, Arial, sans-serif'
+};
+
+var currentRankedStats = null; 
+var currentDateLabel = '';     
+
+var leftPanel = ui.Panel({
+  style: {width: '420px', padding: '15px', backgroundColor: theme.secondary, border: theme.border}
+}); 
+var appMap = ui.Map();
+appMap.style().set('cursor', 'crosshair'); 
+
+// FIX: Set height to 33% by default so the split panel gives 1/3 of the screen to charts
+var bottomPanel = ui.Panel({style: {height: '33%', stretch: 'horizontal', backgroundColor: '#ffffff', padding: '10px'}});
+var rightSplit = ui.SplitPanel({
+  firstPanel: appMap, secondPanel: bottomPanel, orientation: 'vertical', wipe: false, style: {stretch: 'both'}
+});
+
+ui.root.clear(); 
+ui.root.add(leftPanel);
+ui.root.add(rightSplit);
+
+// --- DYNAMIC LEGEND ---
+var legendPanel = ui.Panel({
+  style: { position: 'bottom-left', padding: '12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', shown: false, width: '250px' }
+});
+appMap.add(legendPanel);
+
+// FIX: Added a UI Select to sync map layers and legend automatically
+function updateLegend(indexName, dateString, selectedIndices) {
+  legendPanel.style().set('shown', true);
+  legendPanel.clear();
+  
+  legendPanel.add(ui.Label('Select Active Layer:', {fontWeight: 'bold', fontSize: '11px', color: theme.primary, margin: '0 0 2px 0'}));
+  
+  var layerSelect = ui.Select({
+    items: selectedIndices,
+    value: indexName,
+    style: {stretch: 'horizontal', margin: '0 0 10px 0'},
+    onChange: function(selected) {
+      // Toggle map layers
+      appMap.layers().forEach(function(layer) {
+        var name = layer.getName();
+        if (name !== 'All Fields' && name !== 'Selected Field Boundary') {
+          // Show only layers associated with the selected index (checking start of name)
+          layer.setShown(name.indexOf(selected + ' ') === 0);
+        }
+      });
+      // Refresh legend content for the newly selected index
+      updateLegend(selected, dateString, selectedIndices);
+    }
+  });
+  legendPanel.add(layerSelect);
+  
+  legendPanel.add(ui.Label('Legend: ' + indexName, {fontWeight: 'bold', fontSize: '14px', margin: '0 0 2px 0', color: theme.primary}));
+  legendPanel.add(ui.Label('Date: ' + dateString, {fontSize: '11px', color: 'gray', margin: '0 0 10px 0'}));
+  
+  var vis = indexVisParams[indexName];
+  if(vis) {
+    legendPanel.add(ui.Label('Index Value (' + vis.min + ' to ' + vis.max + ')', {fontSize: '11px', fontWeight: 'bold'}));
+    var palettePanel = ui.Panel({layout: ui.Panel.Layout.Flow('horizontal'), style: {margin: '0 0 12px 0'}});
+    vis.palette.forEach(function(c) {
+      palettePanel.add(ui.Label('', {backgroundColor: c, padding: '8px 15px', margin: '0'}));
+    });
+    legendPanel.add(palettePanel);
+  }
+  
+  legendPanel.add(ui.Label('Spatial Anomalies (Z-Score)', {fontWeight: 'bold', fontSize: '11px', margin: '0 0 5px 0'}));
+  var makeLegendRow = function(color, name) {
+      return ui.Panel({
+        layout: ui.Panel.Layout.Flow('horizontal'),
+        widgets: [
+          ui.Label('', {backgroundColor: color, padding: '8px', margin: '0'}),
+          ui.Label(name, {fontSize: '11px', margin: '0 0 0 8px'})
+        ]
+      });
+  };
+  legendPanel.add(makeLegendRow('red', '< -1.5 (High Stress)'));
+  legendPanel.add(makeLegendRow('blue', '> 1.5 (High Vigour)'));
+}
+
+// --- INSPECTOR PANEL ---
+var inspectorPanel = ui.Panel({
+  style: { position: 'bottom-right', padding: '12px', backgroundColor: 'rgba(255, 255, 255, 0.95)', width: '280px', shown: false, border: '1px solid #ccc' }
+});
+appMap.add(inspectorPanel);
+
+var fieldSelect = ui.Select({placeholder: 'Calculating PCA weights...', style: {stretch: 'horizontal'}});
+var selectAllCb = ui.Checkbox({label: 'Select All Indices', value: false, style: {fontWeight: 'bold', margin: '10px 0 5px 0', color: theme.primary, backgroundColor: theme.secondary}});
+
+var indexCheckboxes = {};
+var checkboxPanel = ui.Panel({layout: ui.Panel.Layout.Flow('horizontal', true), style: {margin: '0 0 15px 0', backgroundColor: theme.secondary}});
+
+availableIndices.forEach(function(index) {
+  var cb = ui.Checkbox({label: index, value: index === 'PCA_Index', style: {margin: '0 10px 8px 0', backgroundColor: theme.secondary}}); 
+  indexCheckboxes[index] = cb;
+  checkboxPanel.add(cb);
+});
+
+selectAllCb.onChange(function(checked) {
+  Object.keys(indexCheckboxes).forEach(function(key) { indexCheckboxes[key].setValue(checked); });
+});
+
+var generateBtn = ui.Button({ 
+  label: 'Generate Map & Chart(s)', 
+  onClick: runAnalysis, 
+  style: {stretch: 'horizontal', color: theme.primary, margin: '15px 0', border: '1px solid ' + theme.primary} 
+});
+
+var weightLabel = ui.Label({style: {fontSize: '11px', color: '#1f77b4', margin: '0 0 10px 0', fontWeight: 'bold', backgroundColor: theme.secondary}});
+var tablePanel = ui.Panel({style: {margin: '15px 0', stretch: 'both', backgroundColor: theme.secondary}});
+
+leftPanel.add(ui.Label('🌱 Crop Stress Monitoring', {fontWeight: 'bold', fontSize: '20px', margin: '0 0 5px 0', color: theme.primary, backgroundColor: theme.secondary}));
+leftPanel.add(ui.Label('Field-Level Stress Ranking & Analytics', {fontSize: '13px', margin: '0 0 20px 0', color: '#555', backgroundColor: theme.secondary}));
+leftPanel.add(ui.Label('1. Select Field (C_ID):', {fontWeight: 'bold', fontSize: '13px', backgroundColor: theme.secondary}));
+leftPanel.add(fieldSelect);
+leftPanel.add(ui.Label('2. Select Indices to Plot:', {fontWeight: 'bold', fontSize: '13px', backgroundColor: theme.secondary}));
+leftPanel.add(selectAllCb);
+leftPanel.add(checkboxPanel);
+leftPanel.add(generateBtn);
+leftPanel.add(ui.Label('💡 Tip: Click chart points to load map dates. Click fields on map for details.', {color: '#666', fontSize: '11px', backgroundColor: theme.secondary}));
+leftPanel.add(tablePanel);
+
+appMap.centerObject(fieldsWithArea, 18); 
+appMap.layers().set(0, ui.Map.Layer(ee.Image().paint(fieldsWithArea, 0, 1), {palette: ['#aaaaaa']}, 'All Fields', true, 0.5)); 
+
+// ==============================================================================
+// 6. FUNCTIONS & APP LOGIC
+// ==============================================================================
+var serverParams = ee.Dictionary({
+  ids: fieldsWithArea.aggregate_array('C_ID').distinct().sort(),
+  w_ndvi: pc1Weights.get([0]),
+  w_ndre: pc1Weights.get([1]),
+  w_ndmi: pc1Weights.get([2]),
+  w_msavi: pc1Weights.get([3])
+});
+
+serverParams.evaluate(function(res) {
+  if (res.ids) {
+    fieldSelect.items().reset(res.ids.map(String));
+    fieldSelect.setPlaceholder('Choose a field...');
+    var formula = 'PCA Weights: NDVI (' + res.w_ndvi.toFixed(2) + '), NDRE (' + 
+                  res.w_ndre.toFixed(2) + '), NDMI (' + res.w_ndmi.toFixed(2) + 
+                  '), MSAVI (' + res.w_msavi.toFixed(2) + ')';
+    weightLabel.setValue(formula);
+  }
+});
+
+// FIX: updateLegend is no longer called per index here, it is triggered once for the view group
+function addMapLayers(targetImage, indexName, isVisible, dateString) {
+  var vis = indexVisParams[indexName];
+  appMap.layers().add(ui.Map.Layer(targetImage.select(indexName), vis, indexName + ' - ' + dateString, isVisible));
+  
+  var stats = targetImage.select(indexName).reduceRegion({
+    reducer: ee.Reducer.mean().combine({reducer2: ee.Reducer.stdDev(), sharedInputs: true}),
+    geometry: fieldsWithArea, scale: 10, maxPixels: 1e9
+  });
+  
+  var mean = ee.Number(stats.get(indexName + '_mean'));
+  var std = ee.Number(stats.get(indexName + '_stdDev'));
+  var zScoreImg = targetImage.select(indexName).subtract(mean).divide(std);
+  var anomalyMask = zScoreImg.lt(-1.5).or(zScoreImg.gt(1.5));
+  var anomalyVis = ee.Image(0).where(zScoreImg.lt(-1.5), 1).where(zScoreImg.gt(1.5), 2).updateMask(anomalyMask).clip(fieldsWithArea);
+  
+  appMap.layers().add(ui.Map.Layer(
+    anomalyVis, 
+    {min: 1, max: 2, palette: ['red', 'blue']}, 
+    indexName + ' Anomalies - ' + dateString, 
+    isVisible 
+  ));
+}
+
+function updateRankTable(targetImage, dateLabel) {
+  tablePanel.clear();
+  tablePanel.add(ui.Label('Computing PCA Ranks for ' + dateLabel + '...', {color: 'gray', fontSize: '11px', backgroundColor: theme.secondary}));
+
+  var stats = targetImage.select(availableIndices).reduceRegions({
+    collection: fieldsWithArea, reducer: ee.Reducer.mean(), scale: 10
+  });
+
+  var sortedList = stats.filter(ee.Filter.notNull(['PCA_Index']))
+    .sort('PCA_Index', false) 
+    .toList(1000); 
+    
+  var totalFeatures = sortedList.size();
+
+  var rankedStatsCol = ee.FeatureCollection(sortedList.map(function(f) {
+    var feat = ee.Feature(f);
+    var rank = sortedList.indexOf(f).add(1);
+    var pcaVal = ee.Number(feat.get('PCA_Index'));
+    var areaVal = ee.Number(feat.get('Area_acres'));
+
+    var topThresh = totalFeatures.multiply(0.33); 
+    var midThresh = totalFeatures.multiply(0.66);  
+
+    var priority = ee.Algorithms.If(
+      rank.lte(topThresh), '🟢 Low Stress',
+      ee.Algorithms.If(rank.lte(midThresh), '🟡 Moderate Stress', '🔴 High Stress')
+    );
+
+    return feat.set({
+      'Priority': priority,
+      'Rank': rank,
+      'Area_acres': areaVal.format('%.2f'),
+      'PCA': pcaVal.format('%.3f'),
+      'NDVI': ee.Number(feat.get('NDVI')).format('%.3f'),
+      'NDRE': ee.Number(feat.get('NDRE')).format('%.3f'),
+      'NDMI': ee.Number(feat.get('NDMI')).format('%.3f'),
+      'MSAVI': ee.Number(feat.get('MSAVI')).format('%.3f')
+    });
+  }));
+
+  currentRankedStats = rankedStatsCol;
+  currentDateLabel = dateLabel;
+
+  var rankChart = ui.Chart.feature.byFeature({
+    features: rankedStatsCol, 
+    xProperty: 'C_ID', 
+    yProperties: ['Priority', 'Rank', 'PCA', 'Area_acres', 'NDVI', 'NDRE', 'NDMI', 'MSAVI'] 
+  })
+  .setChartType('Table')
+  .setOptions({
+    page: 'enable',         
+    pageSize: 100,          
+    width: '100%',
+    height: '280px',     
+    sortColumn: 1,          
+    sortAscending: true,
+    allowHtml: true
+  });
+
+  rankChart.onClick(function(c_id) {
+    if (!c_id) return;
+    fieldSelect.setValue(String(c_id));
+    runAnalysis();
+  });
+
+  tablePanel.clear();
+  tablePanel.add(ui.Label('📋 Field Rankings: ' + dateLabel, {fontWeight: 'bold', fontSize: '14px', margin: '0 0 5px 0', color: theme.primary, backgroundColor: theme.secondary}));
+  tablePanel.add(ui.Label('Click any C_ID below to load its charts and map.', {color: '#666', fontSize: '11px', margin: '0 0 10px 0', backgroundColor: theme.secondary}));
+  tablePanel.add(weightLabel);
+  tablePanel.add(rankChart);
+}
+
+appMap.onClick(function(coords) {
+  if (!currentRankedStats) return; 
+  
+  inspectorPanel.style().set('shown', true);
+  inspectorPanel.clear();
+  inspectorPanel.add(ui.Label('Fetching field data...', {color: 'gray'}));
+  
+  var clickPoint = ee.Geometry.Point([coords.lon, coords.lat]);
+  var clickedFeature = currentRankedStats.filterBounds(clickPoint);
+  
+  clickedFeature.evaluate(function(fCol) {
+    inspectorPanel.clear();
+    var headerPanel = ui.Panel({layout: ui.Panel.Layout.Flow('horizontal'), style: {stretch: 'horizontal', margin: '0 0 8px 0'}});
+    headerPanel.add(ui.Label('Field Data (' + currentDateLabel + ')', {fontWeight: 'bold', stretch: 'horizontal', color: theme.primary}));
+    headerPanel.add(ui.Button({label: 'X', style: {padding: '0', margin: '0'}, onClick: function() { inspectorPanel.style().set('shown', false); }}));
+    inspectorPanel.add(headerPanel);
+    
+    var latStr = coords.lat.toFixed(5);
+    var lonStr = coords.lon.toFixed(5);
+    inspectorPanel.add(ui.Label('📍 ' + latStr + '°N, ' + lonStr + '°E', {fontSize: '11px', color: '#666', margin: '0 0 10px 4px'}));
+    
+    if (!fCol || !fCol.features || fCol.features.length === 0) {
+      inspectorPanel.add(ui.Label('No field found at clicked location.', {color: '#d62728', margin: '10px 4px'})); return;
+    }
+    
+    var props = fCol.features[0].properties;
+    var formatLine = function(label, val, bold) {
+      return ui.Panel({ layout: ui.Panel.Layout.Flow('horizontal'), widgets: [
+          ui.Label(label + ':', {color: 'gray', margin: '2px 4px', width: '80px'}),
+          ui.Label(val, {fontWeight: bold ? 'bold' : 'normal', margin: '2px 4px', color: '#333'})
+        ]});
+    };
+
+    inspectorPanel.add(formatLine('C_ID', props.C_ID, true));
+    inspectorPanel.add(formatLine('Priority', props.Priority, true));
+    inspectorPanel.add(formatLine('Rank', '#' + props.Rank, true));
+    inspectorPanel.add(formatLine('Area', props.Area_acres + ' acres', false));
+    inspectorPanel.add(ui.Label('--- INDICES ---', {color: 'gray', fontSize: '10px', margin: '8px 4px 4px 4px'}));
+    inspectorPanel.add(formatLine('PCA', props.PCA, true));
+    inspectorPanel.add(formatLine('NDVI', props.NDVI, false));
+    inspectorPanel.add(formatLine('NDRE', props.NDRE, false));
+    inspectorPanel.add(formatLine('NDMI', props.NDMI, false));
+    inspectorPanel.add(formatLine('MSAVI', props.MSAVI, false));
+  });
+});
+
+function updateMapForDate(clickedIndexName, clickDateValue, targetFeature, selectedIndices) {
+  if (!clickDateValue) return;
+  var clickDate = (clickDateValue instanceof Date) ? clickDateValue : new Date(clickDateValue);
+  
+  var dateOptions = { day: '2-digit', month: 'short', year: 'numeric' };
+  var dateString = clickDate.toLocaleDateString('en-GB', dateOptions);
+  
+  var clickedImage = finalCol.filter(ee.Filter.eq('system:time_start', clickDate.getTime())).first().clip(fieldsWithArea);
+  
+  appMap.layers().reset();
+  appMap.layers().add(ui.Map.Layer(ee.Image().paint(fieldsWithArea, 0, 1), {palette: ['#aaaaaa']}, 'All Fields', true, 0.4));
+  
+  selectedIndices.forEach(function(indexName, i) {
+    var isVisible = (i === 0); 
+    addMapLayers(clickedImage, indexName, isVisible, dateString);
+  });
+  
+  appMap.layers().add(ui.Map.Layer(ee.Image().paint(targetFeature, 0, 2), {palette: ['#000000']}, 'Selected Field Boundary'));
+  updateRankTable(clickedImage, dateString);
+  
+  // FIX: Initialize the legend control once everything is mapped
+  updateLegend(selectedIndices[0], dateString, selectedIndices);
+}
+
+function runAnalysis() {
+  inspectorPanel.style().set('shown', false); 
+  var selectedField = fieldSelect.getValue();
+  
+  if (!selectedField) { alert("Please select a field first."); return; }
+  
+  var selectedIndices = [];
+  for (var key in indexCheckboxes) { if (indexCheckboxes[key].getValue()) selectedIndices.push(key); }
+  
+  if (selectedIndices.length === 0) { alert("Please check at least one index."); return; }
+  
+  var targetFeature = fieldsWithArea.filter(ee.Filter.eq('C_ID', ee.Number.parse(selectedField)));
+  
+  appMap.layers().reset();
+  appMap.layers().add(ui.Map.Layer(ee.Image().paint(fieldsWithArea, 0, 1), {palette: ['#aaaaaa']}, 'All Fields', true, 0.4));
+  
+  var initialMeanImage = finalCol.mean().clip(fieldsWithArea);
+  
+  selectedIndices.forEach(function(indexName, i) {
+    var isVisible = (i === 0); 
+    addMapLayers(initialMeanImage, indexName, isVisible, 'Season Average');
+  });
+
+  appMap.layers().add(ui.Map.Layer(ee.Image().paint(targetFeature, 0, 2), {palette: ['#000000']}, 'Selected Field Boundary'));
+  appMap.centerObject(targetFeature, 18);
+  
+  updateRankTable(initialMeanImage, 'Season Average');
+  
+  // FIX: Initialize the legend control once everything is mapped
+  updateLegend(selectedIndices[0], 'Season Average', selectedIndices);
+  
+  bottomPanel.clear();
+  bottomPanel.add(ui.Label('📈 Time Series Analysis', {fontWeight: 'bold', fontSize: '16px', margin: '10px 10px 5px 10px', color: theme.primary}));
+  bottomPanel.add(ui.Label('Selected Field: ' + selectedField + ' vs Global Average', {fontSize: '13px', color: '#555', margin: '0 10px 15px 10px'}));
+
+  var chartRegions = ee.FeatureCollection([
+    ee.Feature(fieldsWithArea.geometry(), {'label': 'All Fields (Mean)'}),
+    ee.Feature(targetFeature.geometry(), {'label': 'Field ' + selectedField})
+  ]);
+
+  selectedIndices.forEach(function(indexName) {
+    var compChart = ui.Chart.image.seriesByRegion({
+      imageCollection: finalCol.select(indexName),
+      regions: chartRegions, reducer: ee.Reducer.mean(), band: indexName, scale: 10,
+      xProperty: 'system:time_start', seriesProperty: 'label'
+    }).setOptions({
+      title: indexName + ' Progression: ' + startDate + ' to ' + endDate,
+      vAxis: { title: indexName + ' Value' }, 
+      hAxis: { title: 'Date', format: 'MMM-dd-yyyy', gridlines: {count: 7} },
+      curveType: 'function', lineWidth: 2, pointSize: 6, colors: ['#a6cee3', theme.primary],
+      legend: {position: 'top'}
+    });
+
+    compChart.onClick(function(xValue) {
+      updateMapForDate(indexName, xValue, targetFeature, selectedIndices);
+    });
+
+    bottomPanel.add(ui.Panel({widgets: [compChart], style: {height: '250px', margin: '0 10px 20px 10px', border: '1px solid #eee'}}));
+  });
+}
